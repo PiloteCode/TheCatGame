@@ -59,58 +59,25 @@
             box-shadow: 0 2px 8px rgba(59, 130, 246, 0.6);
         }
         
-        .player-marker-container {
-            position: relative;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .radar-wave-permanent {
-            position: absolute;
-            border: 3px solid;
-            border-radius: 50%;
-            animation: radarPulsePermanent 2s ease-out infinite;
-            pointer-events: none;
-        }
-        
-        .radar-wave-permanent:nth-child(1) {
-            animation-delay: 0s;
-        }
-        
-        .radar-wave-permanent:nth-child(2) {
-            animation-delay: 0.6s;
-        }
-        
-        .radar-wave-permanent:nth-child(3) {
-            animation-delay: 1.2s;
-        }
-        
-        @keyframes radarPulsePermanent {
-            0% {
-                width: 30px;
-                height: 30px;
-                opacity: 0.8;
-            }
-            50% {
-                opacity: 0.4;
-            }
-            100% {
-                width: 90px;
-                height: 90px;
-                opacity: 0;
-            }
-        }
-        
         .real-position-marker {
+            width: 20px;
+            height: 20px;
+            background-color: #3b82f6;
+            border: 4px solid white;
+            border-radius: 50%;
+            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.5);
+            position: relative;
+            z-index: 1000;
+        }
+        
+        .public-position-marker {
             width: 16px;
             height: 16px;
-            background-color: #3b82f6;
             border: 3px solid white;
             border-radius: 50%;
             box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
             position: relative;
-            z-index: 10;
+            z-index: 999;
         }
     </style>
 </head>
@@ -120,7 +87,13 @@
     $password = $_GET['pwd'] ?? '';
     
     if (empty($lobbyId) || empty($password)) {
-        echo '<div class="flex items-center justify-center min-h-screen"><p class="text-xl">Paramètres manquants</p></div>';
+        echo '<div class="flex items-center justify-center min-h-screen bg-red-100">
+                <div class="bg-white p-8 rounded-lg shadow-2xl text-center">
+                    <i class="fas fa-exclamation-triangle text-red-500 text-6xl mb-4"></i>
+                    <p class="text-2xl font-bold text-red-600 mb-2">Accès refusé</p>
+                    <p class="text-gray-600">Paramètres manquants</p>
+                </div>
+              </div>';
         exit();
     }
     ?>
@@ -138,21 +111,18 @@
             </div>
             <div class="text-xs text-green-600 space-y-1">
                 <div class="flex items-center gap-2">
-                    <div class="w-4 h-4 rounded-full bg-blue-500 border-2 border-white"></div>
-                    <span>Point bleu = Position réelle (chat)</span>
+                    <div class="w-5 h-5 rounded-full bg-blue-500 border-2 border-white"></div>
+                    <span>Point bleu = Position réelle</span>
                 </div>
                 <div class="flex items-center gap-2">
-                    <div class="w-3 h-3 rounded-full bg-red-500 border border-white"></div>
-                    <span>Point rouge = Position publique</span>
+                    <div class="w-4 h-4 rounded-full bg-red-500 border-2 border-white"></div>
+                    <span>Point rouge + cercle = Position publique</span>
                 </div>
                 <div class="flex items-center gap-2">
                     <div class="w-4 h-4 rounded-full" style="background: #3b82f6; display: flex; align-items: center; justify-content: center;">
                         <i class="fas fa-user text-white" style="font-size: 8px;"></i>
                     </div>
-                    <span>Cercle bleu = Zone hunter (50m)</span>
-                </div>
-                <div class="text-xs text-gray-600 mt-1">
-                    <i class="fas fa-circle-notch"></i> Ondes radar = Zone du chat
+                    <span>Cercle bleu = Hunter (50m)</span>
                 </div>
             </div>
         </div>
@@ -237,6 +207,18 @@
                     updatePlayersList(data.data);
                     updateHuntersList(data.hunters || []);
                     updateStats(data.stats);
+                } else if (data.invalid_password) {
+                    // Mot de passe invalide
+                    document.body.innerHTML = `
+                        <div class="flex items-center justify-center min-h-screen" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                            <div class="bg-white p-12 rounded-2xl shadow-2xl text-center max-w-md animate-pulse">
+                                <i class="fas fa-lock text-red-500 text-8xl mb-6"></i>
+                                <h1 class="text-3xl font-bold text-red-600 mb-4">Mot de passe incorrect</h1>
+                                <p class="text-gray-600 mb-6">Le mot de passe de la tour de contrôle est invalide.</p>
+                                <p class="text-sm text-gray-500">Accès refusé</p>
+                            </div>
+                        </div>
+                    `;
                 }
             } catch (error) {
                 console.error('Erreur:', error);
@@ -276,7 +258,7 @@
                 if (lat === null || lng === null) return;
                 
                 if (type === 'hunter') {
-                    // Hunter avec cercle autour
+                    // Hunter avec cercle de 50m
                     if (!hunters[id]) {
                         const hunterIcon = L.divIcon({
                             className: 'hunter-marker',
@@ -307,129 +289,86 @@
                         </div>
                     `);
                 } else {
-                    // Chat - Position réelle avec effet radar
+                    // Chat - Position réelle (point bleu) + Position publique (point rouge + cercle)
+                    const publicPos = publicPositions?.find(p => p.id === id);
+                    
                     if (!players[id]) {
-                        // Icône avec effet radar et point bleu au centre
+                        // Marker bleu pour position réelle (juste un point)
                         const realIcon = L.divIcon({
-                            className: 'custom-player-icon',
-                            html: `
-                                <div class="player-marker-container" style="width: 40px; height: 40px;">
-                                    <div class="radar-wave-permanent" style="border-color: ${color};"></div>
-                                    <div class="radar-wave-permanent" style="border-color: ${color};"></div>
-                                    <div class="radar-wave-permanent" style="border-color: ${color};"></div>
-                                    <div class="real-position-marker"></div>
-                                </div>
-                            `,
-                            iconSize: [40, 40],
-                            iconAnchor: [20, 20]
+                            className: 'real-marker',
+                            html: `<div class="real-position-marker"></div>`,
+                            iconSize: [20, 20],
+                            iconAnchor: [10, 10]
                         });
                         
                         players[id] = {
-                            circle: L.circle([lat, lng], {
-                                color: color,
-                                fillColor: color,
-                                fillOpacity: 0.2,
-                                radius: radius
-                            }).addTo(map),
                             markerReal: L.marker([lat, lng], { icon: realIcon }).addTo(map)
                         };
                         
                         players[id].markerReal.bindPopup(`
                             <div class="p-2">
                                 <b>${player}</b><br>
-                                <span class="text-blue-600">📍 Position réelle</span><br>
-                                Rayon: ${radius}m
+                                <span class="text-blue-600 font-semibold">📍 Position réelle</span>
                             </div>
                         `);
                         
-                        // Ajouter marker rouge pour position publique si elle existe
-                        const publicPos = publicPositions?.find(p => p.id === id);
+                        // Ajouter marker rouge + cercle pour position publique
                         if (publicPos && publicPos.lat_public !== null && publicPos.lng_public !== null) {
                             const publicIcon = L.divIcon({
                                 className: 'public-marker',
-                                html: `<div style="width: 12px; height: 12px; background-color: #ef4444; border: 2px solid white; border-radius: 50%; box-shadow: 0 2px 6px rgba(0,0,0,0.4);"></div>`,
-                                iconSize: [12, 12],
-                                iconAnchor: [6, 6]
+                                html: `<div class="public-position-marker" style="background-color: ${color};"></div>`,
+                                iconSize: [16, 16],
+                                iconAnchor: [8, 8]
                             });
                             
+                            players[id].circle = L.circle([publicPos.lat_public, publicPos.lng_public], {
+                                color: color,
+                                fillColor: color,
+                                fillOpacity: 0.15,
+                                radius: radius,
+                                weight: 3
+                            }).addTo(map);
+                            
                             players[id].markerPublic = L.marker([publicPos.lat_public, publicPos.lng_public], { icon: publicIcon }).addTo(map);
+                            
                             players[id].markerPublic.bindPopup(`
                                 <div class="p-2">
                                     <b>${player}</b><br>
-                                    <span class="text-red-600">🎯 Position publique</span><br>
-                                    <small>Visible par tous les joueurs</small>
+                                    <span class="font-semibold" style="color: ${color};">🎯 Position publique</span><br>
+                                    <small>Visible par tous - Rayon: ${radius}m</small>
                                 </div>
                             `);
                             
-                            // Ligne entre position réelle et publique
+                            // Ligne pointillée entre position réelle et publique
                             players[id].connectionLine = L.polyline(
                                 [[lat, lng], [publicPos.lat_public, publicPos.lng_public]],
                                 {
                                     color: '#9ca3af',
                                     dashArray: '5, 10',
                                     weight: 2,
-                                    opacity: 0.6
+                                    opacity: 0.5
                                 }
                             ).addTo(map);
                         }
                     } else {
-                        // Mettre à jour les positions
-                        players[id].circle.setLatLng([lat, lng]);
-                        players[id].circle.setRadius(radius);
+                        // Mettre à jour position réelle
                         players[id].markerReal.setLatLng([lat, lng]);
                         
-                        // Mettre à jour l'icône avec la nouvelle couleur si nécessaire
-                        const realIcon = L.divIcon({
-                            className: 'custom-player-icon',
-                            html: `
-                                <div class="player-marker-container" style="width: 40px; height: 40px;">
-                                    <div class="radar-wave-permanent" style="border-color: ${color};"></div>
-                                    <div class="radar-wave-permanent" style="border-color: ${color};"></div>
-                                    <div class="radar-wave-permanent" style="border-color: ${color};"></div>
-                                    <div class="real-position-marker"></div>
-                                </div>
-                            `,
-                            iconSize: [40, 40],
-                            iconAnchor: [20, 20]
-                        });
-                        players[id].markerReal.setIcon(realIcon);
-                        
                         // Mettre à jour position publique
-                        const publicPos = publicPositions?.find(p => p.id === id);
                         if (publicPos && publicPos.lat_public !== null && publicPos.lng_public !== null) {
-                            if (!players[id].markerPublic) {
-                                const publicIcon = L.divIcon({
-                                    className: 'public-marker',
-                                    html: `<div style="width: 12px; height: 12px; background-color: #ef4444; border: 2px solid white; border-radius: 50%; box-shadow: 0 2px 6px rgba(0,0,0,0.4);"></div>`,
-                                    iconSize: [12, 12],
-                                    iconAnchor: [6, 6]
-                                });
-                                
-                                players[id].markerPublic = L.marker([publicPos.lat_public, publicPos.lng_public], { icon: publicIcon }).addTo(map);
-                                players[id].markerPublic.bindPopup(`
-                                    <div class="p-2">
-                                        <b>${player}</b><br>
-                                        <span class="text-red-600">🎯 Position publique</span><br>
-                                        <small>Visible par tous les joueurs</small>
-                                    </div>
-                                `);
-                            } else {
+                            if (players[id].circle) {
+                                players[id].circle.setLatLng([publicPos.lat_public, publicPos.lng_public]);
+                                players[id].circle.setRadius(radius);
+                            }
+                            
+                            if (players[id].markerPublic) {
                                 players[id].markerPublic.setLatLng([publicPos.lat_public, publicPos.lng_public]);
                             }
                             
                             // Mettre à jour la ligne
                             if (players[id].connectionLine) {
-                                map.removeLayer(players[id].connectionLine);
+                                players[id].connectionLine.setLatLngs([[lat, lng], [publicPos.lat_public, publicPos.lng_public]]);
                             }
-                            players[id].connectionLine = L.polyline(
-                                [[lat, lng], [publicPos.lat_public, publicPos.lng_public]],
-                                {
-                                    color: '#9ca3af',
-                                    dashArray: '5, 10',
-                                    weight: 2,
-                                    opacity: 0.6
-                                }
-                            ).addTo(map);
                         }
                     }
                 }
@@ -535,6 +474,17 @@
                 const data = await response.json();
                 if (data.success) {
                     loadPlayers();
+                } else if (data.invalid_password) {
+                    document.body.innerHTML = `
+                        <div class="flex items-center justify-center min-h-screen" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                            <div class="bg-white p-12 rounded-2xl shadow-2xl text-center max-w-md">
+                                <i class="fas fa-lock text-red-500 text-8xl mb-6"></i>
+                                <h1 class="text-3xl font-bold text-red-600 mb-4">Mot de passe incorrect</h1>
+                                <p class="text-gray-600 mb-6">Le mot de passe de la tour de contrôle est invalide.</p>
+                                <p class="text-sm text-gray-500">Accès refusé</p>
+                            </div>
+                        </div>
+                    `;
                 } else {
                     alert('Erreur: ' + data.error);
                 }
@@ -562,6 +512,17 @@
                 const data = await response.json();
                 if (data.success) {
                     loadPlayers();
+                } else if (data.invalid_password) {
+                    document.body.innerHTML = `
+                        <div class="flex items-center justify-center min-h-screen" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                            <div class="bg-white p-12 rounded-2xl shadow-2xl text-center max-w-md">
+                                <i class="fas fa-lock text-red-500 text-8xl mb-6"></i>
+                                <h1 class="text-3xl font-bold text-red-600 mb-4">Mot de passe incorrect</h1>
+                                <p class="text-gray-600 mb-6">Le mot de passe de la tour de contrôle est invalide.</p>
+                                <p class="text-sm text-gray-500">Accès refusé</p>
+                            </div>
+                        </div>
+                    `;
                 } else {
                     alert('Erreur: ' + data.error);
                 }
@@ -588,6 +549,17 @@
                 const data = await response.json();
                 if (data.success) {
                     loadPlayers();
+                } else if (data.invalid_password) {
+                    document.body.innerHTML = `
+                        <div class="flex items-center justify-center min-h-screen" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                            <div class="bg-white p-12 rounded-2xl shadow-2xl text-center max-w-md">
+                                <i class="fas fa-lock text-red-500 text-8xl mb-6"></i>
+                                <h1 class="text-3xl font-bold text-red-600 mb-4">Mot de passe incorrect</h1>
+                                <p class="text-gray-600 mb-6">Le mot de passe de la tour de contrôle est invalide.</p>
+                                <p class="text-sm text-gray-500">Accès refusé</p>
+                            </div>
+                        </div>
+                    `;
                 } else {
                     alert('Erreur: ' + data.error);
                 }

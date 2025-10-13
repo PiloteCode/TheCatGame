@@ -29,58 +29,6 @@
             margin: 0;
         }
         
-        .player-marker-container {
-            position: relative;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .radar-wave-permanent {
-            position: absolute;
-            border: 3px solid #3b82f6;
-            border-radius: 50%;
-            animation: radarPulsePermanent 2s ease-out infinite;
-            pointer-events: none;
-        }
-        
-        .radar-wave-permanent:nth-child(1) {
-            animation-delay: 0s;
-        }
-        
-        .radar-wave-permanent:nth-child(2) {
-            animation-delay: 0.6s;
-        }
-        
-        .radar-wave-permanent:nth-child(3) {
-            animation-delay: 1.2s;
-        }
-        
-        @keyframes radarPulsePermanent {
-            0% {
-                width: 30px;
-                height: 30px;
-                opacity: 0.8;
-            }
-            50% {
-                opacity: 0.4;
-            }
-            100% {
-                width: 90px;
-                height: 90px;
-                opacity: 0;
-            }
-        }
-        
-        .player-avatar {
-            width: 100%;
-            height: 100%;
-            border-radius: 50%;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-            position: relative;
-            z-index: 10;
-        }
-        
         .stat-card {
             backdrop-filter: blur(10px);
             background-color: rgba(255, 255, 255, 0.95);
@@ -97,6 +45,15 @@
             align-items: center;
             justify-content: center;
             z-index: 10000;
+        }
+        
+        .hunter-position-marker {
+            width: 20px;
+            height: 20px;
+            background-color: #3b82f6;
+            border: 3px solid white;
+            border-radius: 50%;
+            box-shadow: 0 3px 8px rgba(59, 130, 246, 0.6);
         }
     </style>
 </head>
@@ -239,6 +196,7 @@
         let currentPosition = null;
         let hunterName = '';
         let sessionId = generateSessionId();
+        let myHunterMarker = null;
         
         function generateSessionId() {
             return 'hunter_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
@@ -288,7 +246,7 @@
         
         async function sendHunterPosition(latitude, longitude) {
             try {
-                await fetch('api/hunter_position.php', {
+                const response = await fetch('api/hunter_position.php', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -299,6 +257,42 @@
                         longitude: longitude
                     })
                 });
+                
+                const data = await response.json();
+                
+                // Mettre à jour ma position sur la carte
+                if (window.mapApp && window.mapApp.map) {
+                    if (!myHunterMarker) {
+                        myHunterMarker = L.marker([latitude, longitude], {
+                            icon: L.divIcon({
+                                className: 'my-hunter-marker',
+                                html: '<div class="hunter-position-marker"></div>',
+                                iconSize: [20, 20],
+                                iconAnchor: [10, 10]
+                            }),
+                            zIndexOffset: 2000
+                        }).addTo(window.mapApp.map);
+                        
+                        myHunterMarker.bindPopup(`
+                            <div class="p-3">
+                                <b style="color: #3b82f6;">👤 Vous</b><br>
+                                <span class="text-sm">${hunterName}</span>
+                            </div>
+                        `);
+                        
+                        // Centrer la carte sur ma position au premier chargement
+                        window.mapApp.map.setView([latitude, longitude], 15);
+                    } else {
+                        myHunterMarker.setLatLng([latitude, longitude]);
+                    }
+                }
+                
+                // Afficher les alertes si proche d'un chat
+                if (data.near_cats && data.near_cats.length > 0) {
+                    data.near_cats.forEach(cat => {
+                        console.log(`🎯 Chat proche détecté: ${cat.player_name} à ${cat.distance}m !`);
+                    });
+                }
             } catch (error) {
                 console.error('Erreur envoi position hunter:', error);
             }

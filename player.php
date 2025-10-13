@@ -89,40 +89,15 @@
             }
         }
         
-        .radar-wave-permanent {
-            position: absolute;
-            border: 3px solid;
+        .my-position-marker {
+            width: 24px;
+            height: 24px;
+            background-color: #3b82f6;
+            border: 4px solid white;
             border-radius: 50%;
-            animation: radarPulsePermanent 2s ease-out infinite;
-            pointer-events: none;
-        }
-        
-        .radar-wave-permanent:nth-child(1) {
-            animation-delay: 0s;
-        }
-        
-        .radar-wave-permanent:nth-child(2) {
-            animation-delay: 0.6s;
-        }
-        
-        .radar-wave-permanent:nth-child(3) {
-            animation-delay: 1.2s;
-        }
-        
-        @keyframes radarPulsePermanent {
-            0% {
-                width: 30px;
-                height: 30px;
-                opacity: 0.8;
-            }
-            50% {
-                opacity: 0.4;
-            }
-            100% {
-                width: 90px;
-                height: 90px;
-                opacity: 0;
-            }
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            position: relative;
+            z-index: 1000;
         }
     </style>
 </head>
@@ -133,15 +108,19 @@
     $password = $_GET['pwd'] ?? '';
     
     if (empty($lobbyId) || empty($playerId) || empty($password)) {
-        echo '<div class="min-h-screen flex items-center justify-center text-white text-xl">Paramètres manquants</div>';
+        echo '<div class="min-h-screen flex items-center justify-center" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                <div class="bg-white p-8 rounded-lg shadow-2xl text-center">
+                    <i class="fas fa-exclamation-triangle text-red-500 text-6xl mb-4"></i>
+                    <p class="text-2xl font-bold text-red-600 mb-2">Accès refusé</p>
+                    <p class="text-gray-600">Paramètres manquants</p>
+                </div>
+              </div>';
         exit();
     }
     ?>
     
-    <!-- Carte en arrière-plan -->
     <div id="map"></div>
     
-    <!-- Panneau d'informations -->
     <div id="infoPanel" class="info-panel">
         <div class="drag-handle" onclick="togglePanel()"></div>
         
@@ -198,9 +177,9 @@
                     <div class="text-sm text-blue-800">
                         <p class="font-semibold mb-1">Mode Chat Authentifié</p>
                         <ul class="text-xs space-y-1">
-                            <li>• Vous voyez les positions réelles des autres chats</li>
+                            <li>• Point bleu = votre position réelle</li>
+                            <li>• Points colorés + cercles = positions publiques des autres</li>
                             <li>• Votre position est envoyée automatiquement</li>
-                            <li>• Gardez le GPS et cette page actifs</li>
                         </ul>
                     </div>
                 </div>
@@ -277,7 +256,6 @@
                 if (data.success) {
                     updateMapPlayers(data.active_only);
                     
-                    // Récupérer ma couleur
                     const me = data.data.find(p => p.player_id === PLAYER_ID);
                     if (me) {
                         myColor = me.color;
@@ -286,6 +264,18 @@
                         document.getElementById('connectionStatus').textContent = me.status === 'active' ? 'Actif' : 'Éliminé';
                         document.getElementById('connectionStatus').className = 'font-semibold text-sm ' + (me.status === 'active' ? 'text-green-600' : 'text-red-600');
                     }
+                } else if (data.invalid_password) {
+                    // Mot de passe invalide
+                    document.body.innerHTML = `
+                        <div class="min-h-screen flex items-center justify-center" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                            <div class="bg-white p-12 rounded-2xl shadow-2xl text-center max-w-md">
+                                <i class="fas fa-lock text-red-500 text-8xl mb-6"></i>
+                                <h1 class="text-3xl font-bold text-red-600 mb-4">Mot de passe incorrect</h1>
+                                <p class="text-gray-600 mb-6">Le mot de passe du chat est invalide.</p>
+                                <p class="text-sm text-gray-500">Accès refusé</p>
+                            </div>
+                        </div>
+                    `;
                 }
             } catch (error) {
                 console.error('Erreur chargement joueurs:', error);
@@ -293,6 +283,15 @@
         }
         
         function updateMapPlayers(playersData) {
+            // Nettoyer les anciens markers
+            Object.keys(players).forEach(id => {
+                if (!playersData.find(p => p.id === id)) {
+                    if (players[id].circle) map.removeLayer(players[id].circle);
+                    if (players[id].marker) map.removeLayer(players[id].marker);
+                    delete players[id];
+                }
+            });
+            
             playersData.forEach(playerData => {
                 const { id, lat, lng, radius, color, player } = playerData;
                 
@@ -301,32 +300,32 @@
                 // Ne pas afficher mon propre marker (je suis au centre avec mon GPS)
                 if (playerData.player_id === PLAYER_ID) return;
                 
+                // Position publique : point + cercle pour les autres joueurs
                 if (!players[id]) {
                     players[id] = {
                         circle: L.circle([lat, lng], {
                             color: color,
                             fillColor: color,
                             fillOpacity: 0.2,
-                            radius: radius
+                            radius: radius,
+                            weight: 3
                         }).addTo(map),
                         marker: L.marker([lat, lng], {
                             icon: L.divIcon({
-                                className: 'custom-player-icon',
-                                html: `
-                                    <div style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; position: relative;">
-                                        <div class="radar-wave-permanent" style="border-color: ${color};"></div>
-                                        <div class="radar-wave-permanent" style="border-color: ${color};"></div>
-                                        <div class="radar-wave-permanent" style="border-color: ${color};"></div>
-                                        <div style="width: 20px; height: 20px; background-color: ${color}; border: 3px solid white; border-radius: 50%; box-shadow: 0 2px 6px rgba(0,0,0,0.4); z-index: 10;"></div>
-                                    </div>
-                                `,
-                                iconSize: [40, 40],
-                                iconAnchor: [20, 20]
+                                className: 'other-player-marker',
+                                html: `<div style="width: 20px; height: 20px; background-color: ${color}; border: 3px solid white; border-radius: 50%; box-shadow: 0 3px 8px rgba(0,0,0,0.4);"></div>`,
+                                iconSize: [20, 20],
+                                iconAnchor: [10, 10]
                             })
                         }).addTo(map)
                     };
                     
-                    players[id].marker.bindPopup(`<b>${player}</b><br>Rayon: ${radius}m`);
+                    players[id].marker.bindPopup(`
+                        <div class="p-3">
+                            <b style="color: ${color};">${player}</b><br>
+                            <span class="text-sm">Zone d'incertitude: ${radius}m</span>
+                        </div>
+                    `);
                 } else {
                     players[id].circle.setLatLng([lat, lng]);
                     players[id].circle.setRadius(radius);
@@ -358,31 +357,37 @@
                     document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
                     document.getElementById('currentPosition').textContent = `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
                     
-                    // Mettre à jour ma position sur la carte
+                    // Mettre à jour ma position sur la carte (point bleu simple)
                     if (!myMarker) {
                         myMarker = L.marker([latitude, longitude], {
                             icon: L.divIcon({
-                                className: 'custom-player-icon',
-                                html: `
-                                    <div style="width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; position: relative;">
-                                        <div class="radar-wave-permanent" style="border-color: ${myColor};"></div>
-                                        <div class="radar-wave-permanent" style="border-color: ${myColor};"></div>
-                                        <div class="radar-wave-permanent" style="border-color: ${myColor};"></div>
-                                        <div style="width: 24px; height: 24px; background-color: ${myColor}; border: 4px solid white; border-radius: 50%; box-shadow: 0 4px 8px rgba(0,0,0,0.4); z-index: 10;"></div>
-                                    </div>
-                                `,
-                                iconSize: [50, 50],
-                                iconAnchor: [25, 25]
+                                className: 'my-marker',
+                                html: `<div class="my-position-marker"></div>`,
+                                iconSize: [24, 24],
+                                iconAnchor: [12, 12]
                             })
                         }).addTo(map);
                         
-                        myMarker.bindPopup(`<b>Vous</b><br>C'est vous !`);
+                        myMarker.bindPopup(`<b>Vous</b><br><span class="text-sm">Votre position réelle</span>`);
                         map.setView([latitude, longitude], 15);
                     } else {
                         myMarker.setLatLng([latitude, longitude]);
                     }
                     
                     return true;
+                } else if (data.invalid_password) {
+                    // Mot de passe invalide - bloquer l'interface
+                    document.body.innerHTML = `
+                        <div class="min-h-screen flex items-center justify-center" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                            <div class="bg-white p-12 rounded-2xl shadow-2xl text-center max-w-md">
+                                <i class="fas fa-lock text-red-500 text-8xl mb-6"></i>
+                                <h1 class="text-3xl font-bold text-red-600 mb-4">Mot de passe incorrect</h1>
+                                <p class="text-gray-600 mb-6">Le mot de passe du chat est invalide.</p>
+                                <p class="text-sm text-gray-500">Accès refusé</p>
+                            </div>
+                        </div>
+                    `;
+                    return false;
                 } else {
                     throw new Error(data.error || 'Erreur inconnue');
                 }

@@ -82,18 +82,18 @@ class MapApp {
 
     handleZoom() {
         Object.keys(this.players).forEach(playerId => {
-            if (this.players[playerId].label) {
+            if (this.players[playerId].marker) {
                 const color = this.players[playerId].circle.options.color;
-                this.players[playerId].label.setIcon(this.createPlayerIcon(color));
+                this.players[playerId].marker.setIcon(this.createPlayerIcon(color));
             }
         });
     }
 
     getIconSize() {
         const zoom = this.map.getZoom();
-        const baseSize = 30;
-        const scale = Math.pow(1.2, zoom - 13);
-        return Math.max(20, Math.min(60, baseSize * scale));
+        const baseSize = 20;
+        const scale = Math.pow(1.15, zoom - 13);
+        return Math.max(16, Math.min(40, baseSize * scale));
     }
 
     createPlayerIcon(color) {
@@ -101,14 +101,7 @@ class MapApp {
         return L.divIcon({
             className: 'custom-player-icon',
             html: `
-                <div class="player-marker-container" style="width: ${size}px; height: ${size}px;">
-                    <div class="radar-wave-permanent" style="border-color: ${color};"></div>
-                    <div class="radar-wave-permanent" style="border-color: ${color};"></div>
-                    <div class="radar-wave-permanent" style="border-color: ${color};"></div>
-                    <img src="https://img.freepik.com/vecteurs-libre/vecteur-conception-degrade-colore-oiseau_343694-2506.jpg?semt=ais_hybrid&w=740&q=80" 
-                         class="player-avatar" 
-                         style="width: ${size}px; height: ${size}px;">
-                </div>
+                <div style="width: ${size}px; height: ${size}px; background-color: ${color}; border: 3px solid white; border-radius: 50%; box-shadow: 0 3px 8px rgba(0,0,0,0.4);"></div>
             `,
             iconSize: [size, size],
             iconAnchor: [size / 2, size / 2]
@@ -132,8 +125,8 @@ class MapApp {
                 this.players[playerId].circle.setRadius(radius);
             }
             
-            if (this.players[playerId] && this.players[playerId].label) {
-                this.players[playerId].label.setLatLng([currentLat, currentLng]);
+            if (this.players[playerId] && this.players[playerId].marker) {
+                this.players[playerId].marker.setLatLng([currentLat, currentLng]);
             }
             
             if (currentStep >= steps) {
@@ -159,18 +152,22 @@ class MapApp {
                         firstValidPlayer = { lat, lng };
                     }
                     
+                    // Position publique : point + cercle
                     if (!this.players[id]) {
                         this.players[id] = {
                             circle: L.circle([lat, lng], {
                                 color: color,
                                 fillColor: color,
                                 fillOpacity: 0.2,
-                                radius: radius
+                                radius: radius,
+                                weight: 3
                             }).addTo(this.map),
-                            label: L.marker([lat, lng], {
+                            marker: L.marker([lat, lng], {
                                 icon: this.createPlayerIcon(color)
                             }).addTo(this.map)
                         };
+                        
+                        // Pas de popup pour les joueurs (mode hunter)
                         
                         if (this.firstLoad && firstValidPlayer && Object.keys(this.players).length === 1) {
                             this.map.setView([lat, lng], CONFIG.defaultZoom);

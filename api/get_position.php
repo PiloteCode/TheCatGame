@@ -16,6 +16,7 @@ $catId = isset($_GET['cat_id']) ? intval($_GET['cat_id']) : null;
 try {
     $db = getDB();
     
+    // Vérifier que le lobby existe
     $stmt = $db->prepare("SELECT * FROM lobbies WHERE lobby_id = ? AND status = 'active'");
     $stmt->execute([$lobbyId]);
     $lobby = $stmt->fetch();
@@ -25,25 +26,86 @@ try {
         exit();
     }
     
-    // Vérifier si c'est un accès tour de contrôle
+    // Variable pour déterminer le type d'accès
     $isControlAccess = false;
-    if ($controlMode && $lobby['control_password'] === $controlPassword) {
-        $isControlAccess = true;
-    }
-    
-    // Vérifier si c'est un accès chat authentifié
     $isCatAccess = false;
-    if ($catMode && $catId !== null) {
-        $stmt = $db->prepare("SELECT * FROM players WHERE lobby_id = ? AND player_id = ? AND password = ?");
-        $stmt->execute([$lobbyId, $catId, $catPassword]);
-        if ($stmt->fetch()) {
-            $isCatAccess = true;
+    $accessType = 'public'; // public, control, cat
+    
+    // VÉRIFICATION STRICTE - Tour de contrôle
+    if ($controlMode) {
+        if (empty($controlPassword)) {
+            echo json_encode([
+                'success' => false, 
+                'error' => 'Mot de passe de contrôle manquant',
+                'access_denied' => true
+            ]);
+            exit();
         }
+        
+        if ($lobby['control_password'] !== $controlPassword) {
+            // Délai anti-bruteforce de 5 secondes
+            sleep(5);
+            echo json_encode([
+                'success' => false, 
+                'error' => 'Mot de passe de contrôle invalide',
+                'access_denied' => true,
+                'invalid_password' => true
+            ]);
+            exit();
+        }
+        
+        // Authentification réussie pour la tour de contrôle
+        $isControlAccess = true;
+        $accessType = 'control';
+    }
+    // VÉRIFICATION STRICTE - Chat authentifié
+    else if ($catMode) {
+        if ($catId === null) {
+            echo json_encode([
+                'success' => false, 
+                'error' => 'ID du chat manquant',
+                'access_denied' => true
+            ]);
+            exit();
+        }
+        
+        if (empty($catPassword)) {
+            echo json_encode([
+                'success' => false, 
+                'error' => 'Mot de passe du chat manquant',
+                'access_denied' => true
+            ]);
+            exit();
+        }
+        
+        // Vérifier que le chat existe et que le mot de passe correspond
+        $stmt = $db->prepare("
+            SELECT * FROM players 
+            WHERE lobby_id = ? AND player_id = ? AND password = ?
+        ");
+        $stmt->execute([$lobbyId, $catId, $catPassword]);
+        $catPlayer = $stmt->fetch();
+        
+        if (!$catPlayer) {
+            // Délai anti-bruteforce de 5 secondes
+            sleep(5);
+            echo json_encode([
+                'success' => false, 
+                'error' => 'Chat introuvable ou mot de passe invalide',
+                'access_denied' => true,
+                'invalid_password' => true
+            ]);
+            exit();
+        }
+        
+        // Authentification réussie pour le chat
+        $isCatAccess = true;
+        $accessType = 'cat';
     }
     
-    // Récupérer tous les joueurs
+    // Récupérer tous les joueurs selon le type d'accès
     if ($isControlAccess || $isCatAccess) {
-        // Tour de contrôle OU chat authentifié : positions réelles
+        // Accès authentifié : positions réelles
         $stmt = $db->prepare("
             SELECT 
                 player_id, 
@@ -63,7 +125,7 @@ try {
             ORDER BY player_id
         ");
     } else {
-        // Vue normale : positions publiques
+        // Accès public (hunter) : positions publiques uniquement
         $stmt = $db->prepare("
             SELECT 
                 player_id, 
@@ -85,21 +147,24 @@ try {
     $stmt->execute([$lobbyId]);
     $allPlayers = $stmt->fetchAll();
     
-    // Récupérer les hunters
-    $stmt = $db->prepare("
-        SELECT 
-            hunter_name,
-            latitude,
-            longitude,
-            points,
-            last_update,
-            TIMESTAMPDIFF(SECOND, last_update, NOW()) as seconds_since_update
-        FROM hunters
-        WHERE lobby_id = ?
-        ORDER BY points DESC
-    ");
-    $stmt->execute([$lobbyId]);
-    $hunters = $stmt->fetchAll();
+    // Récupérer les hunters (seulement pour tour de contrôle)
+    $hunters = [];
+    if ($isControlAccess) {
+        $stmt = $db->prepare("
+            SELECT 
+                hunter_name,
+                latitude,
+                longitude,
+                points,
+                last_update,
+                TIMESTAMPDIFF(SECOND, last_update, NOW()) as seconds_since_update
+            FROM hunters
+            WHERE lobby_id = ?
+            ORDER BY points DESC
+        ");
+        $stmt->execute([$lobbyId]);
+        $hunters = $stmt->fetchAll();
+    }
     
     $activePlayers = [];
     $result = [];
@@ -138,26 +203,24 @@ try {
         }
     }
     
-    // Ajouter les hunters
+    // Ajouter les hunters (seulement pour tour de contrôle)
     $huntersData = [];
-    foreach ($hunters as $hunter) {
-        $isActive = $hunter['seconds_since_update'] <= 60; // Actif si mis à jour dans la dernière minute
-        
-        if ($hunter['latitude'] !== null && $hunter['longitude'] !== null && $isActive) {
-            $hunterData = [
-                'id' => 'hunter_' . md5($hunter['hunter_name']),
-                'hunter_name' => $hunter['hunter_name'],
-                'lat' => floatval($hunter['latitude']),
-                'lng' => floatval($hunter['longitude']),
-                'points' => intval($hunter['points']),
-                'last_update' => strtotime($hunter['last_update']),
-                'type' => 'hunter'
-            ];
+    if ($isControlAccess) {
+        foreach ($hunters as $hunter) {
+            $isActive = $hunter['seconds_since_update'] <= 60;
             
-            $huntersData[] = $hunterData;
-            
-            // Ajouter aux actifs pour l'affichage sur la carte
-            if ($isControlAccess) {
+            if ($hunter['latitude'] !== null && $hunter['longitude'] !== null && $isActive) {
+                $hunterData = [
+                    'id' => 'hunter_' . md5($hunter['hunter_name']),
+                    'hunter_name' => $hunter['hunter_name'],
+                    'lat' => floatval($hunter['latitude']),
+                    'lng' => floatval($hunter['longitude']),
+                    'points' => intval($hunter['points']),
+                    'last_update' => strtotime($hunter['last_update']),
+                    'type' => 'hunter'
+                ];
+                
+                $huntersData[] = $hunterData;
                 $activePlayers[] = $hunterData;
             }
         }
@@ -180,8 +243,8 @@ try {
             'connected' => count(array_filter($result, fn($p) => $p['connected'])),
             'hunters' => count($huntersData)
         ],
-        'control_mode' => $isControlAccess,
-        'cat_mode' => $isCatAccess
+        'access_type' => $accessType,
+        'authenticated' => ($isControlAccess || $isCatAccess)
     ]);
     
 } catch (Exception $e) {

@@ -9,8 +9,19 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 $data = json_decode(file_get_contents('php://input'), true);
 
-if (!isset($data['lobby_id']) || !isset($data['password']) || !isset($data['action'])) {
-    echo json_encode(['success' => false, 'error' => 'Paramètres manquants']);
+// Vérification stricte des paramètres requis
+if (!isset($data['lobby_id']) || empty($data['lobby_id'])) {
+    echo json_encode(['success' => false, 'error' => 'ID du lobby manquant', 'access_denied' => true]);
+    exit();
+}
+
+if (!isset($data['password']) || empty($data['password'])) {
+    echo json_encode(['success' => false, 'error' => 'Mot de passe manquant', 'access_denied' => true]);
+    exit();
+}
+
+if (!isset($data['action']) || empty($data['action'])) {
+    echo json_encode(['success' => false, 'error' => 'Action manquante']);
     exit();
 }
 
@@ -21,19 +32,37 @@ $action = $data['action'];
 try {
     $db = getDB();
     
-    // Vérifier le mot de passe de la tour de contrôle
+    // VÉRIFICATION STRICTE du mot de passe de la tour de contrôle
     $stmt = $db->prepare("
         SELECT * FROM lobbies 
-        WHERE lobby_id = ? AND control_password = ? AND status = 'active'
+        WHERE lobby_id = ? AND status = 'active'
     ");
-    $stmt->execute([$lobbyId, $password]);
+    $stmt->execute([$lobbyId]);
     $lobby = $stmt->fetch();
     
     if (!$lobby) {
-        echo json_encode(['success' => false, 'error' => 'Authentification échouée']);
+        echo json_encode([
+            'success' => false, 
+            'error' => 'Lobby introuvable ou inactif',
+            'access_denied' => true
+        ]);
         exit();
     }
     
+    // Vérifier que le mot de passe correspond
+    if ($lobby['control_password'] !== $password) {
+        // Délai anti-bruteforce de 5 secondes
+        sleep(5);
+        echo json_encode([
+            'success' => false, 
+            'error' => 'Mot de passe de contrôle invalide',
+            'access_denied' => true,
+            'invalid_password' => true
+        ]);
+        exit();
+    }
+    
+    // Le mot de passe est valide, exécuter l'action demandée
     switch ($action) {
         case 'update_player_name':
             if (!isset($data['player_id']) || !isset($data['player_name'])) {
@@ -46,6 +75,14 @@ try {
             
             if (empty($playerName)) {
                 echo json_encode(['success' => false, 'error' => 'Le nom ne peut pas être vide']);
+                exit();
+            }
+            
+            // Vérifier que le joueur existe dans ce lobby
+            $stmt = $db->prepare("SELECT player_id FROM players WHERE lobby_id = ? AND player_id = ?");
+            $stmt->execute([$lobbyId, $playerId]);
+            if (!$stmt->fetch()) {
+                echo json_encode(['success' => false, 'error' => 'Joueur introuvable']);
                 exit();
             }
             
@@ -71,6 +108,19 @@ try {
             $playerId = intval($data['player_id']);
             $radius = intval($data['radius']);
             
+            if ($radius < 50 || $radius > 5000) {
+                echo json_encode(['success' => false, 'error' => 'Rayon invalide (50-5000m)']);
+                exit();
+            }
+            
+            // Vérifier que le joueur existe dans ce lobby
+            $stmt = $db->prepare("SELECT player_id FROM players WHERE lobby_id = ? AND player_id = ?");
+            $stmt->execute([$lobbyId, $playerId]);
+            if (!$stmt->fetch()) {
+                echo json_encode(['success' => false, 'error' => 'Joueur introuvable']);
+                exit();
+            }
+            
             $stmt = $db->prepare("
                 UPDATE players 
                 SET radius = ?, last_update = CURRENT_TIMESTAMP
@@ -94,6 +144,22 @@ try {
             $latitude = floatval($data['latitude']);
             $longitude = floatval($data['longitude']);
             
+            // Validation des coordonnées
+            if ($latitude < -90 || $latitude > 90 || $longitude < -180 || $longitude > 180) {
+                echo json_encode(['success' => false, 'error' => 'Coordonnées invalides']);
+                exit();
+            }
+            
+            // Vérifier que le joueur existe dans ce lobby
+            $stmt = $db->prepare("SELECT player_id, radius FROM players WHERE lobby_id = ? AND player_id = ?");
+            $stmt->execute([$lobbyId, $playerId]);
+            $player = $stmt->fetch();
+            
+            if (!$player) {
+                echo json_encode(['success' => false, 'error' => 'Joueur introuvable']);
+                exit();
+            }
+            
             // Mise à jour de la position réelle uniquement (depuis la tour de contrôle)
             $stmt = $db->prepare("
                 UPDATE players 
@@ -103,10 +169,6 @@ try {
             $stmt->execute([$latitude, $longitude, $lobbyId, $playerId]);
             
             // Historique
-            $stmt = $db->prepare("SELECT radius FROM players WHERE lobby_id = ? AND player_id = ?");
-            $stmt->execute([$lobbyId, $playerId]);
-            $player = $stmt->fetch();
-            
             $stmt = $db->prepare("
                 INSERT INTO position_history (lobby_id, player_id, latitude, longitude, radius)
                 VALUES (?, ?, ?, ?, ?)
@@ -127,9 +189,17 @@ try {
             
             $playerId = intval($data['player_id']);
             
+            // Vérifier que le joueur existe dans ce lobby
+            $stmt = $db->prepare("SELECT player_id FROM players WHERE lobby_id = ? AND player_id = ?");
+            $stmt->execute([$lobbyId, $playerId]);
+            if (!$stmt->fetch()) {
+                echo json_encode(['success' => false, 'error' => 'Joueur introuvable']);
+                exit();
+            }
+            
             $stmt = $db->prepare("
                 UPDATE players 
-                SET status = 'eliminated'
+                SET status = 'eliminated', last_update = CURRENT_TIMESTAMP
                 WHERE lobby_id = ? AND player_id = ?
             ");
             $stmt->execute([$lobbyId, $playerId]);
