@@ -9,7 +9,6 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 $data = json_decode(file_get_contents('php://input'), true);
 
-// Validation
 if (!isset($data['lobby_id']) || !isset($data['password']) || !isset($data['action'])) {
     echo json_encode(['success' => false, 'error' => 'Paramètres manquants']);
     exit();
@@ -35,11 +34,37 @@ try {
         exit();
     }
     
-    // Actions selon le type
     switch ($action) {
+        case 'update_player_name':
+            if (!isset($data['player_id']) || !isset($data['player_name'])) {
+                echo json_encode(['success' => false, 'error' => 'Paramètres manquants']);
+                exit();
+            }
+            
+            $playerId = intval($data['player_id']);
+            $playerName = trim($data['player_name']);
+            
+            if (empty($playerName)) {
+                echo json_encode(['success' => false, 'error' => 'Le nom ne peut pas être vide']);
+                exit();
+            }
+            
+            $stmt = $db->prepare("
+                UPDATE players 
+                SET player_name = ?, last_update = CURRENT_TIMESTAMP
+                WHERE lobby_id = ? AND player_id = ?
+            ");
+            $stmt->execute([$playerName, $lobbyId, $playerId]);
+            
+            echo json_encode([
+                'success' => true,
+                'message' => 'Nom mis à jour'
+            ]);
+            break;
+            
         case 'update_radius':
             if (!isset($data['player_id']) || !isset($data['radius'])) {
-                echo json_encode(['success' => false, 'error' => 'Paramètres manquants pour update_radius']);
+                echo json_encode(['success' => false, 'error' => 'Paramètres manquants']);
                 exit();
             }
             
@@ -61,7 +86,7 @@ try {
             
         case 'update_position':
             if (!isset($data['player_id']) || !isset($data['latitude']) || !isset($data['longitude'])) {
-                echo json_encode(['success' => false, 'error' => 'Paramètres manquants pour update_position']);
+                echo json_encode(['success' => false, 'error' => 'Paramètres manquants']);
                 exit();
             }
             
@@ -69,9 +94,10 @@ try {
             $latitude = floatval($data['latitude']);
             $longitude = floatval($data['longitude']);
             
+            // Mise à jour de la position réelle uniquement (depuis la tour de contrôle)
             $stmt = $db->prepare("
                 UPDATE players 
-                SET latitude = ?, longitude = ?, last_update = CURRENT_TIMESTAMP
+                SET latitude_real = ?, longitude_real = ?, last_update = CURRENT_TIMESTAMP
                 WHERE lobby_id = ? AND player_id = ?
             ");
             $stmt->execute([$latitude, $longitude, $lobbyId, $playerId]);
@@ -95,7 +121,7 @@ try {
             
         case 'eliminate_player':
             if (!isset($data['player_id'])) {
-                echo json_encode(['success' => false, 'error' => 'Paramètres manquants pour eliminate_player']);
+                echo json_encode(['success' => false, 'error' => 'Paramètres manquants']);
                 exit();
             }
             
@@ -115,7 +141,6 @@ try {
             break;
             
         case 'force_refresh':
-            // Mettre à jour le timestamp du lobby pour forcer le refresh
             $stmt = $db->prepare("
                 UPDATE lobbies 
                 SET updated_at = CURRENT_TIMESTAMP

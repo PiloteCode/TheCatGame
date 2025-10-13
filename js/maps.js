@@ -1,14 +1,11 @@
-// Configuration
 const CONFIG = {
     defaultLat: 48.8566,
     defaultLng: 2.3522,
     defaultZoom: 13,
-    updateInterval: 10000, // 10 secondes
-    animationDuration: 2000, // 2 secondes
-    apiEndpoint: 'api/fakeposition.php'
+    updateInterval: 5000,
+    animationDuration: 2000
 };
 
-// Récupérer les paramètres URL
 function getUrlParams() {
     const params = new URLSearchParams(window.location.search);
     return {
@@ -19,14 +16,13 @@ function getUrlParams() {
     };
 }
 
-// Application principale
 class MapApp {
     constructor() {
         this.map = null;
         this.players = {};
         this.urlParams = getUrlParams();
+        this.firstLoad = true;
         
-        // Vérifier les paramètres requis
         if (!this.urlParams.lobbyId) {
             alert('ID du lobby manquant');
             window.location.href = 'index.php';
@@ -37,34 +33,24 @@ class MapApp {
     }
 
     init() {
-        // Initialisation de la carte
         this.map = L.map('map').setView([CONFIG.defaultLat, CONFIG.defaultLng], CONFIG.defaultZoom);
         
-        // Ajout de la couche CartoDB Voyager
         L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+            attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
             maxZoom: 19
         }).addTo(this.map);
         
-        // Gestion du clic sur la carte
         this.map.on('click', (e) => this.handleMapClick(e));
-        
-        // Gestion du zoom
         this.map.on('zoomend', () => this.handleZoom());
         
-        // Initialisation du statut réseau
         this.updateNetworkStatus();
         window.addEventListener('online', () => this.updateNetworkStatus());
         window.addEventListener('offline', () => this.updateNetworkStatus());
         
-        // Première mise à jour
         this.updatePositions();
-        
-        // Mise à jour automatique
         setInterval(() => this.updatePositions(), CONFIG.updateInterval);
     }
 
-    // Gestion du clic sur la carte
     handleMapClick(e) {
         const lat = e.latlng.lat.toFixed(6);
         const lng = e.latlng.lng.toFixed(6);
@@ -94,7 +80,6 @@ class MapApp {
             .openOn(this.map);
     }
 
-    // Gestion du zoom
     handleZoom() {
         Object.keys(this.players).forEach(playerId => {
             if (this.players[playerId].label) {
@@ -104,7 +89,6 @@ class MapApp {
         });
     }
 
-    // Calcul de la taille de l'icône en fonction du zoom
     getIconSize() {
         const zoom = this.map.getZoom();
         const baseSize = 30;
@@ -112,7 +96,6 @@ class MapApp {
         return Math.max(20, Math.min(60, baseSize * scale));
     }
 
-    // Création de l'icône du joueur avec ondes radar
     createPlayerIcon(color) {
         const size = this.getIconSize();
         return L.divIcon({
@@ -132,7 +115,6 @@ class MapApp {
         });
     }
 
-    // Animation de déplacement d'un joueur
     animatePlayer(playerId, fromLat, fromLng, toLat, toLng, radius, color) {
         const steps = 60;
         const stepDuration = CONFIG.animationDuration / steps;
@@ -142,41 +124,41 @@ class MapApp {
             currentStep++;
             const progress = currentStep / steps;
             
-            // Interpolation linéaire
             const currentLat = fromLat + (toLat - fromLat) * progress;
             const currentLng = fromLng + (toLng - fromLng) * progress;
             
-            // Mise à jour du cercle
             if (this.players[playerId] && this.players[playerId].circle) {
                 this.players[playerId].circle.setLatLng([currentLat, currentLng]);
                 this.players[playerId].circle.setRadius(radius);
             }
             
-            // Mise à jour du label
             if (this.players[playerId] && this.players[playerId].label) {
                 this.players[playerId].label.setLatLng([currentLat, currentLng]);
             }
             
-            // Fin de l'animation
             if (currentStep >= steps) {
                 clearInterval(animate);
             }
         }, stepDuration);
     }
 
-    // Mise à jour des positions depuis l'API
     async updatePositions() {
         try {
-            const response = await fetch(`${CONFIG.apiEndpoint}?lobby_id=${this.urlParams.lobbyId}`);
+            const response = await fetch(`api/get_position.php?lobby_id=${this.urlParams.lobbyId}`);
             const result = await response.json();
             
             if (result.success) {
-                let firstPlayer = true;
+                let firstValidPlayer = null;
                 
-                result.data.forEach((playerData, index) => {
+                result.active_only.forEach(playerData => {
                     const { id, lat, lng, radius, player, color } = playerData;
                     
-                    // Première apparition du joueur
+                    if (lat === null || lng === null) return;
+                    
+                    if (!firstValidPlayer) {
+                        firstValidPlayer = { lat, lng };
+                    }
+                    
                     if (!this.players[id]) {
                         this.players[id] = {
                             circle: L.circle([lat, lng], {
@@ -190,17 +172,17 @@ class MapApp {
                             }).addTo(this.map)
                         };
                         
-                        // Centrer la carte sur le premier joueur uniquement au chargement initial
-                        if (firstPlayer && Object.keys(this.players).length === 1) {
+                        if (this.firstLoad && firstValidPlayer && Object.keys(this.players).length === 1) {
                             this.map.setView([lat, lng], CONFIG.defaultZoom);
-                            firstPlayer = false;
                         }
                     } else {
-                        // Animation vers la nouvelle position
                         const oldLatLng = this.players[id].circle.getLatLng();
                         this.animatePlayer(id, oldLatLng.lat, oldLatLng.lng, lat, lng, radius, color);
                     }
                 });
+                
+                this.firstLoad = false;
+                this.updateNetworkStatus(false);
             } else {
                 console.error('Erreur API:', result.error);
                 this.updateNetworkStatus(true);
@@ -211,10 +193,11 @@ class MapApp {
         }
     }
 
-    // Mise à jour du statut réseau
     updateNetworkStatus(error = false) {
         const networkIcon = document.getElementById('networkIcon');
         const networkText = document.getElementById('networkText');
+        
+        if (!networkIcon || !networkText) return;
         
         if (error) {
             networkIcon.className = 'fas fa-wifi-slash text-xl text-red-500';
@@ -223,7 +206,6 @@ class MapApp {
             return;
         }
         
-        // Vérifier si l'API Network Information est disponible
         if ('connection' in navigator) {
             const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
             const effectiveType = connection.effectiveType;
@@ -246,7 +228,6 @@ class MapApp {
                 networkText.className = 'text-sm font-medium text-blue-600';
             }
         } else {
-            // Si l'API n'est pas disponible, vérifier simplement si on est en ligne
             if (navigator.onLine) {
                 networkIcon.className = 'fas fa-wifi text-xl text-green-500';
                 networkText.textContent = 'En ligne';
@@ -259,23 +240,20 @@ class MapApp {
         }
     }
 
-    // Actualisation manuelle
     async manualRefresh() {
         const icon = document.getElementById('refreshIcon');
+        if (icon) icon.classList.add('fa-spin');
         
-        // Animation de rotation
-        icon.classList.add('fa-spin');
-        
-        // Appeler la mise à jour
         await this.updatePositions();
         
-        setTimeout(() => {
-            icon.classList.remove('fa-spin');
-        }, 1000);
+        if (icon) {
+            setTimeout(() => {
+                icon.classList.remove('fa-spin');
+            }, 1000);
+        }
     }
 }
 
-// Initialisation de l'application au chargement de la page
 document.addEventListener('DOMContentLoaded', () => {
     window.mapApp = new MapApp();
 });
