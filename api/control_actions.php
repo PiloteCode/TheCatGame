@@ -50,9 +50,8 @@ try {
     }
     
     // Vérifier que le mot de passe correspond
-    if ($lobby['control_password'] !== $password) {
-        // Délai anti-bruteforce de 5 secondes
-        sleep(5);
+    if (!checkSecret($lobby['control_password'], $password)) {
+        failDelay();
         echo json_encode([
             'success' => false, 
             'error' => 'Mot de passe de contrôle invalide',
@@ -71,7 +70,7 @@ try {
             }
             
             $playerId = intval($data['player_id']);
-            $playerName = trim($data['player_name']);
+            $playerName = cleanName($data['player_name']);
             
             if (empty($playerName)) {
                 echo json_encode(['success' => false, 'error' => 'Le nom ne peut pas être vide']);
@@ -230,8 +229,5 @@ try {
     }
     
 } catch (Exception $e) {
-    echo json_encode([
-        'success' => false,
-        'error' => 'Erreur lors de l\'action: ' . $e->getMessage()
-    ]);
+    serverError('Erreur lors de l\'action', $e);
 }

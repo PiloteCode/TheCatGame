@@ -1,0 +1,7 @@
+<?php
+// Copier ce fichier en api/config.local.php (ignoré par git) et y mettre les
+// vrais identifiants. Les variables d'environnement DB_* marchent aussi.
+define('DB_HOST', 'localhost');
+define('DB_NAME', 'thecatgame');
+define('DB_USER', 'thecatgame');
+define('DB_PASS', 'change-moi');

@@ -189,7 +189,12 @@
     <script src="js/maps.js"></script>
     
     <script>
-        const LOBBY_ID = '<?php echo htmlspecialchars($lobbyId); ?>';
+        const LOBBY_ID = <?php echo json_encode($lobbyId, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+
+        // Échappe le texte venant des joueurs (pseudos) avant de l'insérer en HTML
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
         const UPDATE_INTERVAL = 5000;
         
         let watchId = null;
@@ -205,13 +210,19 @@
         function getCookie(name) {
             const value = `; ${document.cookie}`;
             const parts = value.split(`; ${name}=`);
-            if (parts.length === 2) return parts.pop().split(';').shift();
+            if (parts.length === 2) {
+                try {
+                    return decodeURIComponent(parts.pop().split(';').shift());
+                } catch {
+                    return undefined;
+                }
+            }
         }
         
         function setCookie(name, value, days) {
             const expires = new Date();
             expires.setTime(expires.getTime() + days * 24 * 60 * 60 * 1000);
-            document.cookie = `${name}=${value};expires=${expires.toUTCString()};path=/`;
+            document.cookie = `${name}=${encodeURIComponent(value)};expires=${expires.toUTCString()};path=/;SameSite=Lax`;
         }
         
         function checkHunterName() {
@@ -276,7 +287,7 @@
                         myHunterMarker.bindPopup(`
                             <div class="p-3">
                                 <b style="color: #3b82f6;">👤 Vous</b><br>
-                                <span class="text-sm">${hunterName}</span>
+                                <span class="text-sm">${escapeHtml(hunterName)}</span>
                             </div>
                         `);
                         
@@ -373,7 +384,7 @@
                         <div class="flex items-center justify-between p-2 rounded" style="background-color: ${statusBg}; border-left: 3px solid ${p.color};">
                             <div class="flex items-center gap-2">
                                 <i class="fas fa-cat" style="color: ${p.color};"></i>
-                                <span class="text-sm font-semibold">${playerName}</span>
+                                <span class="text-sm font-semibold">${escapeHtml(playerName)}</span>
                             </div>
                             <span class="text-xs px-2 py-1 rounded" style="background-color: ${statusColor}; color: white;">
                                 ${statusText}

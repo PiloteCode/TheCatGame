@@ -216,6 +216,11 @@
     <script>
         let catCount = 2;
         let selectedMode = 'self';
+
+        // Échappe le texte venant des joueurs (pseudos) avant de l'insérer en HTML
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
         
         window.addEventListener('DOMContentLoaded', () => {
             anime({
@@ -478,14 +483,14 @@
                         <i class="fas fa-info-circle text-blue-600"></i>
                         <h3 class="font-bold text-blue-900">Informations du lobby</h3>
                     </div>
-                    <p class="text-blue-800"><strong>Nom :</strong> ${lobbyName}</p>
+                    <p class="text-blue-800"><strong>Nom :</strong> ${escapeHtml(lobbyName)}</p>
                     <p class="text-blue-800"><strong>ID :</strong> ${lobbyId}</p>
                     <p class="text-blue-800"><strong>Mode :</strong> ${mode === 'control' ? 'Tour de contrôle' : 'Self Control'}</p>
                 </div>
             `;
             
             if (mode === 'control' && controlPassword) {
-                const controlUrl = `${baseUrl}control.php?lobby=${lobbyId}&pwd=${controlPassword}`;
+                const controlUrl = `${baseUrl}control.php?lobby=${lobbyId}#pwd=${controlPassword}`;
                 html += `
                     <div class="mb-6 p-4 border-2 rounded-lg" style="border-color: #d4a574; background-color: rgba(212, 165, 116, 0.05);">
                         <div class="flex items-center gap-2 mb-3">
@@ -522,14 +527,14 @@
             
             html += `<div class="space-y-4">`;
             players.forEach(player => {
-                const chatUrl = `${baseUrl}player.php?lobby=${lobbyId}&id=${player.player_id}&pwd=${player.password}`;
+                const chatUrl = `${baseUrl}player.php?lobby=${lobbyId}&id=${player.player_id}#pwd=${player.password}`;
                 const playerName = player.player_name || `Chat ${player.player_id}`;
                 
                 html += `
                     <div class="p-4 border-2 border-gray-300 rounded-lg">
                         <div class="flex items-center gap-2 mb-3">
                             <i class="fas fa-cat text-2xl" style="color: ${player.color};"></i>
-                            <h3 class="font-bold text-lg">${playerName}</h3>
+                            <h3 class="font-bold text-lg">${escapeHtml(playerName)}</h3>
                         </div>
                         ${!player.player_name ? '<p class="text-sm text-gray-600 mb-3">Le pseudo peut être défini via la tour de contrôle</p>' : ''}
                         <div class="mb-3">
@@ -564,7 +569,7 @@
             if (mode === 'control') {
                 html += `
                     <div class="mt-6 space-y-3">
-                        <a href="control.php?lobby=${lobbyId}&pwd=${controlPassword}" 
+                        <a href="control.php?lobby=${lobbyId}#pwd=${controlPassword}" 
                            class="block w-full py-4 rounded-lg font-bold text-lg text-center shadow-lg"
                            style="background-color: #d4a574; color: #2c3e50;">
                             <i class="fas fa-tower-broadcast mr-2"></i>

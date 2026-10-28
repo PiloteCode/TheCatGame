@@ -1,15 +1,22 @@
 <?php
-// Configuration de la base de données
-define('DB_HOST', 'localhost');
-define('DB_NAME', 'thecatgame');
-define('DB_USER', 'thecatgame');
-define('DB_PASS', '%Vevi55&LAn1heao');
+// Configuration de la base de données : les identifiants ne sont plus dans le
+// dépôt. Ils viennent de api/config.local.php (ignoré par git, voir
+// config.local.php.example) ou des variables d'environnement DB_*.
+if (is_file(__DIR__ . '/config.local.php')) {
+    require __DIR__ . '/config.local.php';
+}
+foreach (['DB_HOST' => 'localhost', 'DB_NAME' => 'thecatgame', 'DB_USER' => 'thecatgame', 'DB_PASS' => ''] as $name => $default) {
+    if (!defined($name)) {
+        $value = getenv($name);
+        define($name, $value !== false ? $value : $default);
+    }
+}
 
 // Classe de connexion à la base de données
 class Database {
     private static $instance = null;
     private $connection;
-    
+
     private function __construct() {
         try {
             $this->connection = new PDO(
@@ -23,27 +30,28 @@ class Database {
                 ]
             );
         } catch(PDOException $e) {
+            error_log('[thecatgame] Connexion BDD : ' . $e->getMessage());
             die(json_encode([
                 'success' => false,
                 'error' => 'Erreur de connexion à la base de données'
             ]));
         }
     }
-    
+
     public static function getInstance() {
         if (self::$instance === null) {
             self::$instance = new self();
         }
         return self::$instance;
     }
-    
+
     public function getConnection() {
         return $this->connection;
     }
-    
+
     // Prévenir le clonage de l'instance
     private function __clone() {}
-    
+
     // Prévenir la désérialisation de l'instance
     public function __wakeup() {
         throw new Exception("Cannot unserialize singleton");
@@ -55,40 +63,57 @@ function getDB() {
     return Database::getInstance()->getConnection();
 }
 
-// Fonction pour générer un ID unique
+// Chaîne aléatoire tirée avec un générateur cryptographique (random_int)
+function randomString($length, $alphabet) {
+    $result = '';
+    $max = strlen($alphabet) - 1;
+    for ($i = 0; $i < $length; $i++) {
+        $result .= $alphabet[random_int(0, $max)];
+    }
+    return $result;
+}
+
+// Fonction pour générer un ID unique (sans I, L, O, 0, 1 pour éviter les confusions)
 function generateId($length = 6) {
-    return strtoupper(substr(md5(uniqid(rand(), true)), 0, $length));
+    return randomString($length, 'ABCDEFGHJKMNPQRSTUVWXYZ23456789');
 }
 
 // Fonction pour générer un mot de passe
 function generatePassword($length = 8) {
-    return substr(str_shuffle('abcdefghijklmnopqrstuvwxyz0123456789'), 0, $length);
+    return randomString($length, 'abcdefghijklmnopqrstuvwxyz0123456789');
 }
 
-// Fonction pour valider un mot de passe
-function validatePassword($lobbyId, $role, $password) {
-    $db = getDB();
-    
-    if ($role === 'control') {
-        $stmt = $db->prepare("SELECT control_password FROM lobbies WHERE lobby_id = ?");
-        $stmt->execute([$lobbyId]);
-        $result = $stmt->fetch();
-        return $result && $result['control_password'] === $password;
-    } else if ($role === 'cat') {
-        $stmt = $db->prepare("SELECT password FROM players WHERE lobby_id = ? AND player_id = ?");
-        $stmt->execute([$lobbyId, $_GET['id'] ?? 1]);
-        $result = $stmt->fetch();
-        return $result && $result['password'] === $password;
+// Comparaison à temps constant (pas d'indice sur le mot de passe via le temps de réponse)
+function checkSecret($expected, $given) {
+    return is_string($expected) && is_string($given) && $expected !== '' && hash_equals($expected, $given);
+}
+
+// Délai après un mauvais mot de passe : freine les essais sans bloquer un worker PHP 5 secondes
+function failDelay() {
+    usleep(random_int(500000, 1000000));
+}
+
+// Nettoie un nom saisi par un joueur : pas de caractères de contrôle, longueur bornée
+function cleanName($value, $max = 30) {
+    if (!is_string($value)) {
+        return '';
     }
-    
-    return false;
+    // preg_replace renvoie null si la chaîne n'est pas de l'UTF-8 valide
+    $value = preg_replace('/[\x00-\x1F\x7F]/u', '', $value) ?? '';
+    return mb_substr(trim($value), 0, $max);
 }
 
-// Headers CORS
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
+// Réponse d'erreur générique : le détail technique reste dans les logs du serveur
+function serverError($context, $e) {
+    error_log('[thecatgame] ' . $context . ' : ' . $e->getMessage());
+    http_response_code(500);
+    echo json_encode(['success' => false, 'error' => $context]);
+}
+
+// L'API n'est appelée que par les pages du jeu (même origine) : pas d'en-tête CORS
 header('Content-Type: application/json');
+header('X-Content-Type-Options: nosniff');
+header('Cache-Control: no-store');
 
 // Gérer les requêtes OPTIONS
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {

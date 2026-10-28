@@ -105,9 +105,8 @@
     <?php
     $lobbyId = $_GET['lobby'] ?? '';
     $playerId = $_GET['id'] ?? '';
-    $password = $_GET['pwd'] ?? '';
     
-    if (empty($lobbyId) || empty($playerId) || empty($password)) {
+    if (empty($lobbyId) || empty($playerId)) {
         echo '<div class="min-h-screen flex items-center justify-center" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
                 <div class="bg-white p-8 rounded-lg shadow-2xl text-center">
                     <i class="fas fa-exclamation-triangle text-red-500 text-6xl mb-4"></i>
@@ -190,9 +189,29 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
     <script>
-        const LOBBY_ID = '<?php echo htmlspecialchars($lobbyId); ?>';
+        const LOBBY_ID = <?php echo json_encode($lobbyId, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
         const PLAYER_ID = <?php echo intval($playerId); ?>;
-        const PASSWORD = '<?php echo htmlspecialchars($password); ?>';
+        const PASSWORD = readSecret();
+
+        // Le mot de passe est dans le fragment (#pwd=…), que le navigateur n'envoie
+        // jamais au serveur. Les anciens liens (?pwd=…) restent acceptés et sont
+        // réécrits pour retirer le mot de passe de l'URL.
+        function readSecret() {
+            const fromHash = new URLSearchParams(location.hash.slice(1)).get('pwd');
+            if (fromHash) return fromHash;
+            const params = new URLSearchParams(location.search);
+            const fromQuery = params.get('pwd');
+            if (fromQuery) {
+                params.delete('pwd');
+                history.replaceState(null, '', location.pathname + '?' + params.toString() + '#pwd=' + encodeURIComponent(fromQuery));
+            }
+            return fromQuery || '';
+        }
+
+        // Échappe le texte venant des joueurs (pseudos) avant de l'insérer en HTML
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
         const UPDATE_INTERVAL = 5000;
         const MAX_RETRIES = 5;
         const RETRY_DELAY = 3000;
@@ -250,7 +269,11 @@
         
         async function loadAllPlayers() {
             try {
-                const response = await fetch(`api/get_position.php?lobby_id=${LOBBY_ID}&cat=true&cat_id=${PLAYER_ID}&cat_pwd=${PASSWORD}`);
+                const response = await fetch('api/get_position.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ lobby_id: LOBBY_ID, cat: true, cat_id: PLAYER_ID, cat_pwd: PASSWORD })
+                });
                 const data = await response.json();
                 
                 if (data.success) {
@@ -264,8 +287,8 @@
                         document.getElementById('connectionStatus').textContent = me.status === 'active' ? 'Actif' : 'Éliminé';
                         document.getElementById('connectionStatus').className = 'font-semibold text-sm ' + (me.status === 'active' ? 'text-green-600' : 'text-red-600');
                     }
-                } else if (data.invalid_password) {
-                    // Mot de passe invalide
+                } else if (data.invalid_password || data.access_denied) {
+                    // Mot de passe invalide ou absent
                     document.body.innerHTML = `
                         <div class="min-h-screen flex items-center justify-center" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
                             <div class="bg-white p-12 rounded-2xl shadow-2xl text-center max-w-md">
@@ -322,7 +345,7 @@
                     
                     players[id].marker.bindPopup(`
                         <div class="p-3">
-                            <b style="color: ${color};">${player}</b><br>
+                            <b style="color: ${color};">${escapeHtml(player)}</b><br>
                             <span class="text-sm">Zone d'incertitude: ${radius}m</span>
                         </div>
                     `);

@@ -28,8 +28,13 @@ if (!isset($data['mode']) || !in_array($data['mode'], ['control', 'self'])) {
 try {
     $db = getDB();
     
-    $lobbyId = generateId(6);
-    $lobbyName = trim($data['lobby_name']);
+    // Code de partie libre (évite une collision avec une partie existante)
+    $exists = $db->prepare("SELECT 1 FROM lobbies WHERE lobby_id = ?");
+    do {
+        $lobbyId = generateId(6);
+        $exists->execute([$lobbyId]);
+    } while ($exists->fetchColumn());
+    $lobbyName = cleanName($data['lobby_name'], 50);
     $mode = $data['mode'];
     $catCount = intval($data['cat_count']);
     $controlPassword = $mode === 'control' ? generatePassword() : null;
@@ -60,9 +65,8 @@ try {
     for ($i = 0; $i < $catCount; $i++) {
         $password = generatePassword();
         $color = $colors[$i % count($colors)];
-        $playerName = isset($playerNames[$i]) && !empty(trim($playerNames[$i])) 
-            ? trim($playerNames[$i]) 
-            : null;
+        $playerName = isset($playerNames[$i]) ? cleanName($playerNames[$i]) : '';
+        $playerName = $playerName !== '' ? $playerName : null;
         $radius = 500;
         
         $stmt->execute([
@@ -97,12 +101,9 @@ try {
     ]);
     
 } catch (Exception $e) {
-    if ($db->inTransaction()) {
+    if (isset($db) && $db->inTransaction()) {
         $db->rollBack();
     }
     
-    echo json_encode([
-        'success' => false,
-        'error' => 'Erreur lors de la création du lobby: ' . $e->getMessage()
-    ]);
+    serverError('Erreur lors de la création du lobby', $e);
 }

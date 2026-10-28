@@ -20,7 +20,7 @@ if (!isset($data['latitude']) || !isset($data['longitude'])) {
 }
 
 $lobbyId = $data['lobby_id'];
-$hunterName = trim($data['hunter_name']);
+$hunterName = cleanName($data['hunter_name']);
 $latitude = floatval($data['latitude']);
 $longitude = floatval($data['longitude']);
 $sessionId = $data['session_id'] ?? session_id();
@@ -106,10 +106,7 @@ try {
     ]);
     
 } catch (Exception $e) {
-    echo json_encode([
-        'success' => false,
-        'error' => 'Erreur lors de la mise à jour: ' . $e->getMessage()
-    ]);
+    serverError('Erreur lors de la mise à jour', $e);
 }
 
 function calculateDistance($lat1, $lon1, $lat2, $lon2) {

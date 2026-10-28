@@ -26,81 +26,82 @@ $latitudeReal = floatval($data['latitude']);
 $longitudeReal = floatval($data['longitude']);
 $radius = isset($data['radius']) ? intval($data['radius']) : null;
 
+if ($latitudeReal < -90 || $latitudeReal > 90 || $longitudeReal < -180 || $longitudeReal > 180) {
+    echo json_encode(['success' => false, 'error' => 'Coordonnées invalides']);
+    exit();
+}
+
 try {
     $db = getDB();
-    
+
     // Vérifier le mot de passe
     $stmt = $db->prepare("
-        SELECT * FROM players 
-        WHERE lobby_id = ? AND player_id = ? AND password = ? AND status = 'active'
+        SELECT p.*, l.mode FROM players p
+        JOIN lobbies l ON l.lobby_id = p.lobby_id
+        WHERE p.lobby_id = ? AND p.player_id = ? AND p.password = ? AND p.status = 'active'
     ");
     $stmt->execute([$lobbyId, $playerId, $password]);
     $player = $stmt->fetch();
-    
+
     if (!$player) {
-        // Délai anti-bruteforce de 5 secondes
-        sleep(5);
+        failDelay();
         echo json_encode([
-            'success' => false, 
+            'success' => false,
             'error' => 'Authentification échouée',
             'invalid_password' => true
         ]);
         exit();
     }
-    
+
+    // Un chat ne règle son rayon lui-même qu'en mode Self Control, et dans les
+    // mêmes bornes que la tour de contrôle (sinon rayon 1 m = position exacte).
+    if ($radius !== null && ($player['mode'] !== 'self' || $radius < 50 || $radius > 5000)) {
+        $radius = null;
+    }
     $currentRadius = $radius !== null ? $radius : intval($player['radius']);
-    
-    // Vérifier si le joueur est toujours dans son cercle aléatoire actuel
+
+    // La zone publique est un cercle centré sur latitude/longitude_public.
+    // Tant que le chat reste dans ce cercle, on la garde.
     $needNewCircle = true;
-    
-    if ($player['circle_center_lat'] !== null && $player['circle_center_lng'] !== null) {
+
+    if ($player['latitude_public'] !== null && $player['longitude_public'] !== null) {
         $distance = calculateDistance(
             $latitudeReal,
             $longitudeReal,
-            floatval($player['circle_center_lat']),
-            floatval($player['circle_center_lng'])
+            floatval($player['latitude_public']),
+            floatval($player['longitude_public'])
         );
-        
-        // Si le joueur est toujours dans son cercle, on garde la position publique
+
         if ($distance <= $currentRadius) {
             $needNewCircle = false;
         }
     }
-    
-    // Générer nouvelle position publique si nécessaire
+
     if ($needNewCircle) {
-        // MARGE DE SÉCURITÉ : utiliser 90% du rayon pour le centre du cercle
-        $safeRadius = $currentRadius * 0.9;
-        
-        // Générer un nouveau cercle aléatoire autour de la position réelle
-        // Le centre du cercle n'est pas forcément la position réelle
-        $offsetAngle = deg2rad(mt_rand(0, 360));
-        $offsetDistance = mt_rand(0, $safeRadius * 0.7); // Le centre peut être décalé jusqu'à 63% du rayon total (70% de 90%)
-        
-        $circleCenterLat = $latitudeReal + ($offsetDistance / 111320) * cos($offsetAngle);
-        $circleCenterLng = $longitudeReal + ($offsetDistance / (111320 * cos(deg2rad($latitudeReal)))) * sin($offsetAngle);
-        
-        // Générer une position publique aléatoire dans ce cercle avec marge de sécurité
-        $publicPosition = generateRandomPositionInCircle($circleCenterLat, $circleCenterLng, $safeRadius);
-        $latitudePublic = $publicPosition['lat'];
-        $longitudePublic = $publicPosition['lng'];
+        // Nouveau centre tiré au hasard à au plus 75 % du rayon de la position
+        // réelle : le chat est donc toujours DANS le cercle affiché. (Avant, le
+        // centre pouvait être décalé jusqu'à 144 % du rayon, et le chat se
+        // retrouvait hors de sa propre zone.)
+        $center = randomPointInDisk($latitudeReal, $longitudeReal, $currentRadius * 0.75);
+        $latitudePublic = $center['lat'];
+        $longitudePublic = $center['lng'];
     } else {
-        // Garder la position publique actuelle
         $latitudePublic = floatval($player['latitude_public']);
         $longitudePublic = floatval($player['longitude_public']);
-        $circleCenterLat = floatval($player['circle_center_lat']);
-        $circleCenterLng = floatval($player['circle_center_lng']);
     }
-    
+    // Conservé pour compatibilité : le centre du cercle est la position publique
+    $circleCenterLat = $latitudePublic;
+    $circleCenterLng = $longitudePublic;
+
     // Mettre à jour la position
     if ($radius !== null) {
         $stmt = $db->prepare("
-            UPDATE players 
-            SET latitude_real = ?, longitude_real = ?, 
+            UPDATE players
+            SET latitude_real = ?, longitude_real = ?,
                 latitude_public = ?, longitude_public = ?,
                 circle_center_lat = ?, circle_center_lng = ?,
-                radius = ?, 
-                connected_at = CURRENT_TIMESTAMP, 
+                radius = ?,
+                connected_at = CURRENT_TIMESTAMP,
                 last_update = CURRENT_TIMESTAMP
             WHERE lobby_id = ? AND player_id = ?
         ");
@@ -113,11 +114,11 @@ try {
         ]);
     } else {
         $stmt = $db->prepare("
-            UPDATE players 
+            UPDATE players
             SET latitude_real = ?, longitude_real = ?,
                 latitude_public = ?, longitude_public = ?,
                 circle_center_lat = ?, circle_center_lng = ?,
-                connected_at = CURRENT_TIMESTAMP, 
+                connected_at = CURRENT_TIMESTAMP,
                 last_update = CURRENT_TIMESTAMP
             WHERE lobby_id = ? AND player_id = ?
         ");
@@ -128,64 +129,47 @@ try {
             $lobbyId, $playerId
         ]);
     }
-    
+
     // Historique avec position réelle
     $stmt = $db->prepare("
         INSERT INTO position_history (lobby_id, player_id, latitude, longitude, radius)
         VALUES (?, ?, ?, ?, ?)
     ");
     $stmt->execute([$lobbyId, $playerId, $latitudeReal, $longitudeReal, $currentRadius]);
-    
+
     echo json_encode([
         'success' => true,
         'message' => 'Position mise à jour',
-        'new_circle' => $needNewCircle,
-        'debug' => [
-            'radius_full' => $currentRadius,
-            'radius_safe' => round($currentRadius * 0.9),
-            'margin' => '10%'
-        ]
+        'new_circle' => $needNewCircle
     ]);
-    
+
 } catch (Exception $e) {
-    echo json_encode([
-        'success' => false,
-        'error' => 'Erreur lors de la mise à jour: ' . $e->getMessage()
-    ]);
+    serverError('Erreur lors de la mise à jour', $e);
 }
 
 // Fonction pour calculer la distance entre deux points en mètres
 function calculateDistance($lat1, $lon1, $lat2, $lon2) {
     $earthRadius = 6371000; // Rayon de la Terre en mètres
-    
+
     $dLat = deg2rad($lat2 - $lat1);
     $dLon = deg2rad($lon2 - $lon1);
-    
+
     $a = sin($dLat/2) * sin($dLat/2) +
          cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
          sin($dLon/2) * sin($dLon/2);
-    
+
     $c = 2 * atan2(sqrt($a), sqrt(1-$a));
-    
+
     return $earthRadius * $c;
 }
 
-// Fonction pour générer une position aléatoire dans un cercle
-function generateRandomPositionInCircle($centerLat, $centerLng, $radiusMeters) {
-    // Générer un angle aléatoire
-    $angle = deg2rad(mt_rand(0, 360));
-    
-    // Générer une distance aléatoire (distribution uniforme dans le cercle)
-    // MARGE DE SÉCURITÉ : utiliser 90% du rayon maximum
-    $maxDistance = $radiusMeters * 0.9;
-    $distance = sqrt(mt_rand(0, 1000) / 1000) * $maxDistance;
-    
-    // Convertir en degrés
-    $latOffset = ($distance / 111320) * cos($angle);
-    $lngOffset = ($distance / (111320 * cos(deg2rad($centerLat)))) * sin($angle);
-    
+// Point tiré uniformément dans un disque de rayon $maxMeters autour d'un point
+function randomPointInDisk($lat, $lng, $maxMeters) {
+    $angle = random_int(0, 359999) / 1000 * M_PI / 180;
+    $distance = sqrt(random_int(0, 1000000) / 1000000) * $maxMeters;
+
     return [
-        'lat' => $centerLat + $latOffset,
-        'lng' => $centerLng + $lngOffset
+        'lat' => $lat + ($distance / 111320) * cos($angle),
+        'lng' => $lng + ($distance / (111320 * cos(deg2rad($lat)))) * sin($angle)
     ];
 }

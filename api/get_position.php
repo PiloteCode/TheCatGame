@@ -1,17 +1,28 @@
 <?php
 require_once 'config.php';
 
-if (!isset($_GET['lobby_id']) || empty($_GET['lobby_id'])) {
+// Les mots de passe arrivent dans le corps d'une requête POST, jamais dans
+// l'URL (qui finit dans les logs du serveur et l'historique). Le GET reste
+// accepté pour l'accès public des chercheurs et les pages déjà ouvertes.
+$input = $_GET;
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $input = json_decode(file_get_contents('php://input'), true);
+    if (!is_array($input)) {
+        $input = [];
+    }
+}
+
+if (empty($input['lobby_id']) || !is_string($input['lobby_id'])) {
     echo json_encode(['success' => false, 'error' => 'ID du lobby requis']);
     exit();
 }
 
-$lobbyId = $_GET['lobby_id'];
-$controlMode = isset($_GET['control']) && $_GET['control'] === 'true';
-$controlPassword = $_GET['control_pwd'] ?? '';
-$catMode = isset($_GET['cat']) && $_GET['cat'] === 'true';
-$catPassword = $_GET['cat_pwd'] ?? '';
-$catId = isset($_GET['cat_id']) ? intval($_GET['cat_id']) : null;
+$lobbyId = $input['lobby_id'];
+$controlMode = in_array($input['control'] ?? null, ['true', true], true);
+$controlPassword = (string) ($input['control_pwd'] ?? '');
+$catMode = in_array($input['cat'] ?? null, ['true', true], true);
+$catPassword = (string) ($input['cat_pwd'] ?? '');
+$catId = isset($input['cat_id']) ? intval($input['cat_id']) : null;
 
 try {
     $db = getDB();
@@ -42,9 +53,8 @@ try {
             exit();
         }
         
-        if ($lobby['control_password'] !== $controlPassword) {
-            // Délai anti-bruteforce de 5 secondes
-            sleep(5);
+        if (!checkSecret($lobby['control_password'], $controlPassword)) {
+            failDelay();
             echo json_encode([
                 'success' => false, 
                 'error' => 'Mot de passe de contrôle invalide',
@@ -87,8 +97,7 @@ try {
         $catPlayer = $stmt->fetch();
         
         if (!$catPlayer) {
-            // Délai anti-bruteforce de 5 secondes
-            sleep(5);
+            failDelay();
             echo json_encode([
                 'success' => false, 
                 'error' => 'Chat introuvable ou mot de passe invalide',
@@ -248,8 +257,5 @@ try {
     ]);
     
 } catch (Exception $e) {
-    echo json_encode([
-        'success' => false,
-        'error' => 'Erreur lors de la récupération des positions: ' . $e->getMessage()
-    ]);
+    serverError('Erreur lors de la récupération des positions', $e);
 }
